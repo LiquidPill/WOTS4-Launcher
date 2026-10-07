@@ -1,0 +1,5 @@
+# Local game outputs and user data
+WOTS4-Launcher-Backups/
+*.orig_bak
+*.unpacked.exe
+self-test.txt
