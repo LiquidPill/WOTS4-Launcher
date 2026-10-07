@@ -1,0 +1,8 @@
+This folder contains Spadira's GPLv3-licensed Way of the Samurai FPS patch source.
+For this launcher package the upstream patcher is narrowed to the tested 60 FPS
+profile; 90 and 120 FPS patch tables/builds are removed. A small SHA-256 helper
+is prepended so the patcher also runs when Windows PowerShell utility module
+auto-loading is restricted. 30 FPS is the original executable/data pair.
+Upstream: https://github.com/Spadira/WayOfTheSamuraiFPSUnlock
+See LICENSE and UPSTREAM-README.txt. The launcher builds from the user's own
+verified unpacked Steam executable and stock MotionDatabase.l only.
