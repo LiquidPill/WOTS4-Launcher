@@ -372,6 +372,11 @@ namespace Wots4Launcher {
     class LauncherForm : Form {
         [DllImport("dwmapi.dll", PreserveSig=true)] static extern int DwmSetWindowAttribute(IntPtr hwnd,int attribute,ref int value,int size);
         TextBox folder=new TextBox(); ComboBox mode=new ComboBox(), filtering=new ComboBox(); Button fpsAction; string unpackedPath="";
+        readonly Timer overlayLaunchTimer=new Timer { Interval=500 };
+        DateTime overlayLaunchDeadline;
+        string overlayGameFolder="";
+        bool overlayPending;
+        LoadingOverlayForm loadingOverlayForm;
         NumericUpDown width=new NumericUpDown(), height=new NumericUpDown(), fov=new NumericUpDown();
         CheckBox focus=new CheckBox(), dof=new CheckBox(), bloom=new CheckBox(), loadingOverlay=new CheckBox(); Label status=new Label();
         ToolTip tips=new ToolTip(); bool loaded; Image headerImage;
@@ -447,7 +452,7 @@ namespace Wots4Launcher {
             base.OnHandleCreated(e);
             try { int dark=1; if(DwmSetWindowAttribute(Handle,20,ref dark,4)!=0) DwmSetWindowAttribute(Handle,19,ref dark,4); } catch { }
         }
-        protected override void OnFormClosed(FormClosedEventArgs e) { if(headerImage!=null)headerImage.Dispose(); base.OnFormClosed(e); }
+        protected override void OnFormClosed(FormClosedEventArgs e) { overlayLaunchTimer.Stop(); overlayLaunchTimer.Dispose(); if(loadingOverlayForm!=null&&!loadingOverlayForm.IsDisposed)loadingOverlayForm.Close(); if(headerImage!=null)headerImage.Dispose(); base.OnFormClosed(e); }
         void ApplyTheme(Control parent) {
             foreach(Control c in parent.Controls) {
                 if(!(c is Label)) c.ForeColor=ink;
@@ -510,11 +515,36 @@ namespace Wots4Launcher {
             RememberUi();
             status.Text="Settings applied. Your previous game files are backed up.";
             if(launch) {
-                var game=Process.Start(new ProcessStartInfo(Path.Combine(folder.Text,"WayOfTheSamurai4.exe")) { WorkingDirectory=folder.Text,UseShellExecute=true });
-                if(game!=null) { if(loadingOverlay.Checked) { var overlay=new LoadingOverlayForm(game); overlay.Show(); } WindowState=FormWindowState.Minimized; }
-                status.Text=loadingOverlay.Checked?"Game started. Settings and backup saved; black-screen detection is enabled.":"Game started. Settings and backup saved; loading-screen detection is off.";
+                overlayGameFolder=Path.GetFullPath(folder.Text).TrimEnd(Path.DirectorySeparatorChar,Path.AltDirectorySeparatorChar);
+                overlayPending=loadingOverlay.Checked;
+                // Steamworks initialization fails when this game is started directly. Ask the Steam client to
+                // launch the installed AppID so it supplies the normal client context to the patched executable.
+                Process.Start(new ProcessStartInfo("steam://run/312780") { WorkingDirectory=folder.Text,UseShellExecute=true });
+                if(overlayPending) { overlayLaunchDeadline=DateTime.UtcNow.AddMinutes(3); overlayLaunchTimer.Tick+=FindLaunchedGameForOverlay; overlayLaunchTimer.Start(); }
+                WindowState=FormWindowState.Minimized;
+                status.Text=loadingOverlay.Checked?"Steam is launching the game. Loading-screen detection will attach to its game window.":"Steam is launching the game. Loading-screen detection is off.";
             }
         }); }
+        void FindLaunchedGameForOverlay(object sender,EventArgs e) {
+            if(!overlayPending||IsDisposed) { overlayLaunchTimer.Stop(); overlayLaunchTimer.Tick-=FindLaunchedGameForOverlay; return; }
+            try {
+                foreach(Process candidate in Process.GetProcessesByName("WayOfTheSamurai4")) {
+                    try {
+                        string image=Path.GetFullPath(candidate.MainModule.FileName).TrimEnd(Path.DirectorySeparatorChar,Path.AltDirectorySeparatorChar);
+                        if(!image.Equals(Path.Combine(overlayGameFolder,"WayOfTheSamurai4.exe"),StringComparison.OrdinalIgnoreCase)) { candidate.Dispose(); continue; }
+                        candidate.Refresh();
+                        if(candidate.MainWindowHandle==IntPtr.Zero) { candidate.Dispose(); continue; }
+                        overlayPending=false; overlayLaunchTimer.Stop(); overlayLaunchTimer.Tick-=FindLaunchedGameForOverlay;
+                        loadingOverlayForm=new LoadingOverlayForm(candidate); loadingOverlayForm.FormClosed+=delegate { loadingOverlayForm=null; };
+                        loadingOverlayForm.Show(); status.Text="Game launched through Steam. Black-screen detection is enabled."; return;
+                    } catch { candidate.Dispose(); }
+                }
+            } catch { }
+            if(DateTime.UtcNow>=overlayLaunchDeadline) {
+                overlayPending=false; overlayLaunchTimer.Stop(); overlayLaunchTimer.Tick-=FindLaunchedGameForOverlay;
+                status.Text="Steam was asked to launch the game, but the game window was not found. Start Way of the Samurai 4 from your Steam Library; keep the launcher open for the loading warning.";
+            }
+        }
         void RefreshFpsButton() {
             if(fpsAction==null)return;
             int rate=0; if(loaded) { try { rate=Engine.Read(folder.Text).Fps; } catch { } }
